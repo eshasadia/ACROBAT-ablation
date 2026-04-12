@@ -19,10 +19,17 @@ import postprocessing as pst
 import utils as u
 import utils_tc as utc
 
-
 import initial_registration as ir
 import nonrigid_registration as nr
 import io_affine as ioa
+
+import sift_ransac as sr
+import orb_ransac as orb
+import akaze_ransac as akaze
+import brisk_ransac as brisk
+import ecc_registration as ecc
+import superpoint_superglue as sg
+import superpoint_ransac as spr
 
 import acrobat_submission_configs as configs
 import paths as p
@@ -169,6 +176,179 @@ def affine_iterative_nonrigid(source, target, **config):
     tc.cuda.empty_cache()
     return displacement_field_nr
 
+
+### -----------------------------------------------------------------------
+### Standalone affine-only methods
+### -----------------------------------------------------------------------
+
+def affine(source, target, **config):
+    """
+    Rotation-based landmark combination without iterative NCC refinement.
+
+    Internally calls rotated_landmark_based_combination with source/target
+    reversed (same convention as affine_iterative) and inverts the result to
+    obtain the displacement field for the source image.
+    """
+    tc.cuda.empty_cache()
+    affine_params = config['affine_params']
+    b_t = time.time()
+    # BEWARE - REVERSED (source/target roles match affine_iterative convention)
+    transform = ir.rotated_landmark_based_combination(target, source, affine_params)
+    e_t = time.time()
+    print(f"Elapsed time: {e_t - b_t}")
+    final_transform = tc.eye(3)
+    final_transform[0:2, 0:3] = transform
+    final_transform = tc.linalg.inv(final_transform)
+    transform = final_transform[0:2, 0:3].unsqueeze(0).to("cuda:0")
+    displacement_field = utc.tc_transform_to_tc_df(transform, source.size())
+    return displacement_field
+
+
+def sift_ransac_registration(source, target, **config):
+    """Standalone SIFT + RANSAC affine registration."""
+    tc.cuda.empty_cache()
+    affine_params = config['affine_params']
+    transform = sr.sift_ransac(source, target, affine_params)
+    displacement_field = utc.tc_transform_to_tc_df(transform, source.size())
+    return displacement_field
+
+
+def orb_ransac_registration(source, target, **config):
+    """Standalone ORB + RANSAC affine registration."""
+    tc.cuda.empty_cache()
+    affine_params = config['affine_params']
+    transform = orb.orb_ransac(source, target, affine_params)
+    displacement_field = utc.tc_transform_to_tc_df(transform, source.size())
+    return displacement_field
+
+
+def akaze_ransac_registration(source, target, **config):
+    """Standalone AKAZE + RANSAC affine registration."""
+    tc.cuda.empty_cache()
+    affine_params = config['affine_params']
+    transform = akaze.akaze_ransac(source, target, affine_params)
+    displacement_field = utc.tc_transform_to_tc_df(transform, source.size())
+    return displacement_field
+
+
+def brisk_ransac_registration(source, target, **config):
+    """Standalone BRISK + RANSAC affine registration."""
+    tc.cuda.empty_cache()
+    affine_params = config['affine_params']
+    transform = brisk.brisk_ransac(source, target, affine_params)
+    displacement_field = utc.tc_transform_to_tc_df(transform, source.size())
+    return displacement_field
+
+
+def ecc_affine_registration(source, target, **config):
+    """Standalone ECC affine registration."""
+    tc.cuda.empty_cache()
+    affine_params = config['affine_params']
+    transform = ecc.ecc_registration(source, target, affine_params)
+    displacement_field = utc.tc_transform_to_tc_df(transform, source.size())
+    return displacement_field
+
+
+def superpoint_superglue_registration(source, target, **config):
+    """Standalone SuperPoint + SuperGlue affine registration."""
+    tc.cuda.empty_cache()
+    affine_params = config['affine_params']
+    transform = sg.superpoint_superglue(source, target, affine_params)
+    displacement_field = utc.tc_transform_to_tc_df(transform, source.size())
+    return displacement_field
+
+
+def superpoint_ransac_registration(source, target, **config):
+    """Standalone SuperPoint + RANSAC affine registration."""
+    tc.cuda.empty_cache()
+    affine_params = config['affine_params']
+    transform = spr.superpoint_ransac(source, target, affine_params)
+    displacement_field = utc.tc_transform_to_tc_df(transform, source.size())
+    return displacement_field
+
+
+### -----------------------------------------------------------------------
+### Affine + nonrigid methods (one for each affine baseline)
+### -----------------------------------------------------------------------
+
+def sift_ransac_nonrigid(source, target, **config):
+    """SIFT + RANSAC affine initialisation followed by nonrigid registration."""
+    tc.cuda.empty_cache()
+    displacement_field_ini = sift_ransac_registration(source, target, **config)
+    tc.cuda.empty_cache()
+    nonrigid_params = config['nonrigid_params']
+    displacement_field_nr = nr.instance_optimization_nonrigid_registration(source, target, displacement_field_ini, nonrigid_params)
+    tc.cuda.empty_cache()
+    return displacement_field_nr
+
+
+def orb_ransac_nonrigid(source, target, **config):
+    """ORB + RANSAC affine initialisation followed by nonrigid registration."""
+    tc.cuda.empty_cache()
+    displacement_field_ini = orb_ransac_registration(source, target, **config)
+    tc.cuda.empty_cache()
+    nonrigid_params = config['nonrigid_params']
+    displacement_field_nr = nr.instance_optimization_nonrigid_registration(source, target, displacement_field_ini, nonrigid_params)
+    tc.cuda.empty_cache()
+    return displacement_field_nr
+
+
+def akaze_ransac_nonrigid(source, target, **config):
+    """AKAZE + RANSAC affine initialisation followed by nonrigid registration."""
+    tc.cuda.empty_cache()
+    displacement_field_ini = akaze_ransac_registration(source, target, **config)
+    tc.cuda.empty_cache()
+    nonrigid_params = config['nonrigid_params']
+    displacement_field_nr = nr.instance_optimization_nonrigid_registration(source, target, displacement_field_ini, nonrigid_params)
+    tc.cuda.empty_cache()
+    return displacement_field_nr
+
+
+def brisk_ransac_nonrigid(source, target, **config):
+    """BRISK + RANSAC affine initialisation followed by nonrigid registration."""
+    tc.cuda.empty_cache()
+    displacement_field_ini = brisk_ransac_registration(source, target, **config)
+    tc.cuda.empty_cache()
+    nonrigid_params = config['nonrigid_params']
+    displacement_field_nr = nr.instance_optimization_nonrigid_registration(source, target, displacement_field_ini, nonrigid_params)
+    tc.cuda.empty_cache()
+    return displacement_field_nr
+
+
+def ecc_nonrigid(source, target, **config):
+    """ECC affine initialisation followed by nonrigid registration."""
+    tc.cuda.empty_cache()
+    displacement_field_ini = ecc_affine_registration(source, target, **config)
+    tc.cuda.empty_cache()
+    nonrigid_params = config['nonrigid_params']
+    displacement_field_nr = nr.instance_optimization_nonrigid_registration(source, target, displacement_field_ini, nonrigid_params)
+    tc.cuda.empty_cache()
+    return displacement_field_nr
+
+
+def superpoint_superglue_nonrigid(source, target, **config):
+    """SuperPoint + SuperGlue affine initialisation followed by nonrigid registration."""
+    tc.cuda.empty_cache()
+    displacement_field_ini = superpoint_superglue_registration(source, target, **config)
+    tc.cuda.empty_cache()
+    nonrigid_params = config['nonrigid_params']
+    displacement_field_nr = nr.instance_optimization_nonrigid_registration(source, target, displacement_field_ini, nonrigid_params)
+    tc.cuda.empty_cache()
+    return displacement_field_nr
+
+
+def superpoint_ransac_nonrigid(source, target, **config):
+    """SuperPoint + RANSAC affine initialisation followed by nonrigid registration."""
+    tc.cuda.empty_cache()
+    displacement_field_ini = superpoint_ransac_registration(source, target, **config)
+    tc.cuda.empty_cache()
+    nonrigid_params = config['nonrigid_params']
+    displacement_field_nr = nr.instance_optimization_nonrigid_registration(source, target, displacement_field_ini, nonrigid_params)
+    tc.cuda.empty_cache()
+    return displacement_field_nr
+
+
+### -----------------------------------------------------------------------
 
 def run():
     config = configs.affine_nonrigid_config()
